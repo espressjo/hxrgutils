@@ -9,16 +9,57 @@ from astropy.io import fits
 from hxrgutils.type.read import hxread
 from os.path import join,isfile
 from os import getcwd
-from os import stderr
+from sys import stderr
 import numpy as np
 
 def show(im):
+    """
+    Given an ndarray, this function will show 
+    the image in ds9.
+
+    Parameters
+    ----------
+    im : ndarray
+        Image.
+
+    Returns
+    -------
+    None.
+
+    """
     fits.PrimaryHDU(data=im).writeto("/var/tmp/tmp.fits",overwrite=True)
     from os import popen
     popen("ds9 -zscale /var/tmp/tmp.fits").read()
-def make_ramp(fname,errors=False):
+def make_ramp(fname,errors=False,nonlin="",bias=""):
+    """
+    Generate a ramp object from a list of filename or 
+    a data cube of individual read.
+
+    Parameters
+    ----------
+    fname : STR/LIST
+        Either a list of individual read or the file
+        name of a cube of individual read.
+    errors : BOOL, optional
+        Weither we compute the error on the slope or not. 
+        The default is false.
+    nonlin : STR, optional
+        filename of the nonlinearity reference file
+    bias : STR, optional
+        filename of the bias reference file
+
+    Returns
+    -------
+    R : hxramp
+        Ramp object.
+
+    """
     from tqdm import tqdm
     R = hxramp()
+    if nonlin!="" and isfile(nonlin):
+        R.upload_nonlin(nonlin)
+    if bias!="" and isfile(bias):
+        R.upload_bias(bias)
     r = hxread()
     print("Performing fits2ramp...")
     if isinstance(fname, list):
