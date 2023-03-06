@@ -161,8 +161,8 @@ class hxramp():
                 print("Bias file has wrong format")
                 exit(1)
             self.selfbias = False
-            if "UID" in self.getheader(fname):
-                self.H["BIASUID"] = (self.getheader(fname)["UID"],"Unique ID number for the bias cal. file.")
+            if "UID" in fits.getheader(fname):
+                self.H["BIASUID"] = (fits.getheader(fname)["UID"],"Unique ID number for the bias cal. file.")
         else:
             print("[Warning] bias file not found, will perform selfbias")            
     def unfold(self):
