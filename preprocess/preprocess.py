@@ -26,7 +26,7 @@ def f_h_lines(im:np.ndarray):
     """
     if im.dtype!=np.float64:
         im = im.astype(np.float64)
-    h_l = im.median(axis=1)
+    h_l = np.median(im,axis=1)
     for i in range(im.shape[1]):
         im[:,i]-=h_l
     return im
