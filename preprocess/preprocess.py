@@ -8,7 +8,7 @@ Created on Mon Feb 13 16:20:47 2023
 
 import numpy as np
 
-def f_h_lines(im:np.ndarray):
+def f_h_lines(im:np.ndarray,start=0,stop=4096):
     """
     Remove horizontal line commonly found after 1/f noise is removed due
     to capacitive coupling.
@@ -26,11 +26,11 @@ def f_h_lines(im:np.ndarray):
     """
     if im.dtype!=np.float64:
         im = im.astype(np.float64)
-    h_l = np.median(im,axis=1)
+    H = np.zeros(im.shape)
     for i in range(im.shape[0]):
-        im[i,:]-=h_l[i]
-    return im
-def butterfly(im:np.ndarray):
+        H[i,:] = np.nanmedian(im[i,start:stop])
+    return im-H
+def butterfly(im:np.ndarray,amps=32):
     """
     Calculate and subtract the butterfly effect we see on raw ramps.
 
@@ -51,7 +51,7 @@ def butterfly(im:np.ndarray):
         im = im.astype(np.float64)
     butterfly = np.zeros(im.shape)
     strip = [];
-    for i in range(32):
+    for i in range(amps):
         if i%2==0:
             strip.append(np.fliplr(im[:,i*128:(i+1)*128]))
         else:
