@@ -197,15 +197,16 @@ class hxramp():
             self.total_integration = self.H['HIERARCH ESO DET SEQ1 DIT']
         if len(hdu)==5:
             #SPIP or SPIRou
+            print("SPIRou/SPIP")
             self.a = np.asarray(hdu[1].data,dtype=float)
             self.b = np.asarray(hdu[2].data,dtype=float)
             self.errslope = np.asarray(hdu[3].data,dtype=float)
-            self.n = hdu[4].data
+            self.n = np.asarray(hdu[4].data,dtype=np.int16)
         elif len(hdu)==4:
             #NIRPS
             self.a = np.asarray(hdu[1].data,dtype=float)
             self.b = np.asarray(hdu[2].data,dtype=float)
-            self.n = hdu[3].data
+            self.n = np.asarray(hdu[3].data,dtype=np.int16)
         else:
             print("Shape of ramp file not recongnized.",file=stderr)
     def init_from_read(self,read):
@@ -427,8 +428,11 @@ class hxramp():
             return np.where(self.n>0,(np.cumsum(self.timestamp))[self.n-1],0)
         else:
             max_n = np.amax(self.n)
+            print(max_n)
             for i in range(max_n):
                 self.timestamp.append((i+1)*self.inttime)
+            
+            print(self.timestamp)
             return np.where(self.n>0,(np.cumsum(self.timestamp))[self.n-1],0)
     def fit(self):
         """
