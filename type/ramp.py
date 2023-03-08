@@ -106,7 +106,8 @@ class hxramp():
             self.oddeven = kwargs.get('oddeven')
         if 'refpxeachread' in kwargs:
             self.refpxeachread = kwargs.get('refpxeachread')
-
+        if 'saturation' in kwargs:
+            self.saturation = kwargs.get('saturation')
     def nlcorr(self,array):
         """
         Apply the non-lineariy correction. If no NL file
