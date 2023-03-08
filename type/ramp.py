@@ -30,7 +30,7 @@ def show(im):
     fits.PrimaryHDU(data=im).writeto("/var/tmp/tmp.fits",overwrite=True)
     from os import popen
     popen("ds9 -zscale /var/tmp/tmp.fits").read()
-def make_ramp(fname,errors=False,nonlin="",bias=""):
+def make_ramp(fname,errors=False,nonlin="",bias="",**kwargs):
     """
     Generate a ramp object from a list of filename or 
     a data cube of individual read.
@@ -47,7 +47,9 @@ def make_ramp(fname,errors=False,nonlin="",bias=""):
         filename of the nonlinearity reference file
     bias : STR, optional
         filename of the bias reference file
-
+    NOTE
+    -----
+        **kwargs is pass directly to hxramp()
     Returns
     -------
     R : hxramp
@@ -55,7 +57,7 @@ def make_ramp(fname,errors=False,nonlin="",bias=""):
 
     """
     from tqdm import tqdm
-    R = hxramp()
+    R = hxramp(**kwargs)
     if nonlin!="" and isfile(nonlin):
         R.upload_nonlin(nonlin)
     if bias!="" and isfile(bias):
