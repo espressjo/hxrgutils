@@ -63,12 +63,17 @@ class hxread(refpxcorr,stats):
         else:
             self.refpxcorr()
             self.H.add_comment('refpixcorr performed')
-
+    def writeto(self,fname):
+        fits.PrimaryHDU(data=self.im,header=self.H).writeto(fname,overwrite=True)
+    def ds9(self):
+        fits.PrimaryHDU(data=self.im,header=self.H).writeto("/var/tmp/read.fits",overwrite=True)
+        from os import popen 
+        popen("ds9 -zscale /var/tmp/read.fits").read()
     def get_deviant_pixels(self,pixel_bin=32,low_threshold=0.5,hi_threshold=1.3):
         #pixel size of the binning box
         import numpy as np
         pix_bin = pixel_bin
-        nbin = 4096//pix_bin
+        nbin = (self.x*1024)//pix_bin
         percentile = 50
         im = np.copy(self.im)
         box = np.zeros([nbin,nbin])
@@ -98,8 +103,8 @@ class hxread(refpxcorr,stats):
         self.low_pixels = len(rav[rav==1])
         return self.low_pixels,self.hi_pixels
     def get_amp(self,n):
-        x_start = (n-1)*128
-        x_stop = (n)*128
+        x_start = (n-1)*int(self.w/32)
+        x_stop = (n)*int(self.w/32)
         return hxrg_amp(self.im[:,x_start:x_stop],namp=n)
     def writeto(self,fname):
         hdul = fits.PrimaryHDU(data=self.im,header=self.H)
@@ -210,8 +215,8 @@ class hxread(refpxcorr,stats):
     def fft(self,max_freq=200):
         from scipy.fft import fft
         from numpy import linspace,abs
-        t = asarray(range(128*4096))*0.00001
-        y = zeros((128*4096))
+        t = asarray(range(int( (self.w/32)*self.w) ))*0.00001
+        y = zeros(( int( (self.w/32)*self.w )  ))
         for i in range(32):
             amp = self.get_amp(i+1)
             amp/=amp.stats('median')
