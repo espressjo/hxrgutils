@@ -91,7 +91,7 @@ class hxramp():
             self.saturation = kwargs.get('saturation')
         else:
             self.saturation = 45000
-        
+        self.norefpxcorr = False
         self.refpxeachread = False
         self.selfbias = True
         self.toponly = False
@@ -108,6 +108,8 @@ class hxramp():
             self.refpxeachread = kwargs.get('refpxeachread')
         if 'saturation' in kwargs:
             self.saturation = kwargs.get('saturation')
+        if 'norefpxcorr' in kwargs:
+            self.norefpxcorr = kwargs.get('norefpxcorr')
     def nlcorr(self,array):
         """
         Apply the non-lineariy correction. If no NL file
@@ -452,10 +454,11 @@ class hxramp():
         valid = self.n>1
         self.b[valid] = (self.sx*self.sxy-self.sx2*self.sy)[valid]/(self.sx**2-self.n*self.sx2)[valid] # algebra of the linear fit
         self.a[valid] = (self.sy-self.n*self.b)[valid]/self.sx[valid]        
-        if not self.refpxeachread:
-            self.a = self.applyrefpxcorr(self.a)
-            
-        if self.refpxeachread:
+        if not self.norefpxcorr:
+            if not self.refpxeachread:
+                self.a = self.applyrefpxcorr(self.a)
+        
+        if self.refpxeachread and not self.norefpxcorr:
             print("Ref. px. corrected after each read")
         else:
             print("Ref. px. corrected on the slope")
@@ -464,14 +467,14 @@ class hxramp():
         else:
             print("super bias used")
         
-        if self.toponly:
+        if self.toponly and not self.norefpxcorr:
             print("Only using top and side ref. px.")
-        elif self.notopnobottom:
+        elif self.notopnobottom and not self.norefpxcorr:
             print("Only side ref. px. used")
         else:
             print("All ref. px. used")
         
-        if self.oddeven:
+        if self.oddeven and not self.norefpxcorr:
             print("odd and even column processed separetly")
    
         if self.nl:
