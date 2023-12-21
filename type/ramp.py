@@ -80,13 +80,17 @@ def make_ramp(fname,errors=False,nonlin="",bias="",**kwargs):
     return R
 class hxramp():
     def __init__(self,**kwargs):
+        if 'h2rg' in kwargs and kwargs.get('h2rg'):
+            self.x = 2
+        else:
+            self.x = 4
         self.i = 0
         self.H = fits.Header()
         self.timestamp = [];
-        self.inttime = 5.24288
-        self.bias = np.zeros((4096,4096))
+        self.inttime = (self.x*1024)**2*1e-5/32.
+        self.bias = np.zeros((self.x*1024,self.x*1024))
         self.err_calulated = False#flag for the error calculation
-        self.errslope = np.zeros([4096,4096],dtype=float)+np.nan
+        self.errslope = np.zeros([self.x*1024,self.x*1024],dtype=float)+np.nan
         if 'saturation' in kwargs:
             self.saturation = kwargs.get('saturation')
         else:
@@ -162,7 +166,7 @@ class hxramp():
         '''
         if isfile(fname):
             self.bias = fits.getdata(fname)
-            if self.bias.shape!=(4096,4096):
+            if self.bias.shape!=(self.x*1024,self.x*1024):
                 print("Bias file has wrong format")
                 exit(1)
             self.selfbias = False
@@ -180,14 +184,15 @@ class hxramp():
         None.
 
         '''
+        w = int(self.x*1024/32.)
         for i in range(32):
             if (i+1)%2!=0:
-                amp = self.a[:,i*128:(i*128)+128]
-                self.a[:,i*128:(i*128)+128] = np.fliplr(amp)                
-                amp = self.b[:,i*128:(i*128)+128]
-                self.b[:,i*128:(i*128)+128] = np.fliplr(amp)
-                amp = self.n[:,i*128:(i*128)+128]
-                self.n[:,i*128:(i*128)+128] = np.fliplr(amp)
+                amp = self.a[:,i*w:(i*w)+w]
+                self.a[:,i*w:(i*w)+w] = np.fliplr(amp)                
+                amp = self.b[:,i*w:(i*w)+w]
+                self.b[:,i*w:(i*w)+w] = np.fliplr(amp)
+                amp = self.n[:,i*w:(i*w)+w]
+                self.n[:,i*w:(i*w)+w] = np.fliplr(amp)
     def __call__(self,fname:str):
         '''
         Open a ramp file for NIRPS, SPIP or SPIRou.
@@ -228,6 +233,7 @@ class hxramp():
         None.
 
         '''
+        self.x = read.x
         self.shape = (read.x*1024,read.x*1024)
         self.sx = np.zeros(self.shape)
         self.sx2 = np.zeros(self.shape)
@@ -236,6 +242,14 @@ class hxramp():
         self.sxy = np.zeros(self.shape)
         self.a = np.zeros(self.shape)#slope
         self.b = np.zeros(self.shape)#intercept
+        
+        if self.x!=4:#re init some variable in case it's not H4RG
+            self.inttime = (self.x*1024)**2*1e-5/32.
+            self.bias = np.zeros((self.x*1024,self.x*1024))
+            self.errslope = np.zeros([self.x*1024,self.x*1024],dtype=float)+np.nan
+        
+        
+        
     def applyrefpxcorr(self,array):
         '''
         Apply ref pix. correction given the options
@@ -377,10 +391,10 @@ class hxramp():
         dim3 = len(Cube)
         sx = self.create_sx()
         
-        varx2 = np.zeros([4096,4096],dtype=float)
-        vary2 = np.zeros([4096,4096],dtype=float)
-        xp = np.zeros([4096,4096],dtype=float)
-        goodmask = np.full((4096,4096),True,dtype=bool)
+        varx2 = np.zeros([self.x*1024,self.x*1024],dtype=float)
+        vary2 = np.zeros([self.x*1024,self.x*1024],dtype=float)
+        xp = np.zeros([self.x*1024,self.x*1024],dtype=float)
+        goodmask = np.full((self.x*1024,self.x*1024),True,dtype=bool)
         valid = (self.n>2)
         xp[valid]=sx[valid]/self.n[valid] # used in the determination of error below
         print('we now compute the standard error on the slope')
