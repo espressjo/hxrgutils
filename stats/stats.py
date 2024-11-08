@@ -6,7 +6,7 @@ Created on Sun Dec 13 12:08:57 2020
 @author: espressjo
 """
 from astropy.stats import sigma_clipped_stats as sc
-from numpy import percentile
+from numpy import percentile,isnan
 
 class stats():
     def __init__(self,data):
@@ -19,13 +19,13 @@ class stats():
         else:
             sigma = 6
         if 'std' in stats:
-            return sc(self.data,sigma=sigma)[2]
+            return sc(self.data[~isnan(self.data)],sigma=sigma)[2]
         elif 'median' in stats:
-            return sc(self.data,sigma=sigma)[1]
+            return sc(self.data[~isnan(self.data)],sigma=sigma)[1]
         elif 'mean' in stats:
-            return sc(self.data,sigma=sigma)[0]
+            return sc(self.data[~isnan(self.data)],sigma=sigma)[0]
         else:
-            return sc(self.data,sigma=sigma)
+            return sc(self.data[~isnan(self.data)],sigma=sigma)
     def vline(self,ax,x,label='',color=''):
         lim = ax.get_ylim()
         ax.set_ylim(lim)

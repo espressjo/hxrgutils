@@ -15,7 +15,7 @@ from os import getcwd
 from hxrgutils.type.amp import hxrg_amp
 from hxrgutils.fits2ramp.refpixcorr import refpxcorr
 from hxrgutils.stats.stats import stats
-from numpy import ndarray
+from numpy import ndarray,isnan,isfinite,interp
 
 class hxread(refpxcorr,stats):
     def __init__(self,x=4):
@@ -28,7 +28,7 @@ class hxread(refpxcorr,stats):
         self.fname = ''
         self.low_pixels = 0
         self.hi_pixels = 0
-    def __call__(self,data):
+    def __call__(self,data,header=None):
         if isinstance(data,str):
             if '/' not in data:
                 data = join(getcwd(),data)
@@ -47,6 +47,11 @@ class hxread(refpxcorr,stats):
             self.w = self.shape[1]
             self.h = self.shape[0]
             self.x = int(self.w/1024)
+            if header==None:
+                self.H = fits.Header()
+            else:
+                self.H = header
+            self.fname = "tmp.fits"
         stats.__init__(self,self.im)
         refpxcorr.__init__(self,self.im)
         #implement for data
@@ -215,15 +220,26 @@ class hxread(refpxcorr,stats):
     def fft(self,max_freq=200):
         from scipy.fft import fft
         from numpy import linspace,abs
+        
         t = asarray(range(int( (self.w/32)*self.w) ))*0.00001
         y = zeros(( int( (self.w/32)*self.w )  ))
         for i in range(32):
             amp = self.get_amp(i+1)
             amp/=amp.stats('median')
             y+= amp.ravel()
+        
+        if any(isnan(y)):
+            print("\n::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
+            print(":::   [Warning] NaN detected, fix solution not yet fully tested.   :::")
+            print("::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\n")
+            mask = isfinite(y)
+            y = interp(t,t[mask],y[mask])    
+            t = t[mask]
+        
         tt = t[-1]-t[0]
         N = len(t)
         T = tt / N
+        
         yf = fft(y)
         yf = asarray(2.0/N * abs(yf[0:N//2]))
         xf = linspace(0.0, 1.0/(2.0*T), N//2)
