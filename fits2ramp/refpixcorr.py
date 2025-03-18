@@ -21,7 +21,7 @@ class refpxcorr():
             return(np.nan)
         return(np.median(data2[g]))
     
-    def refpxcorr(self,oddeven=False):
+    def refpxcorr(self,oddeven=False,medfiltersize=15):
         # function that corrects with reference pixels on the sides of the H2RG and H4RG.
         #
         # On the periphery of the arrays, there are 4 pixels that are not light-sensitive 
@@ -54,7 +54,7 @@ class refpxcorr():
         ref_sides = [0, 1, 2, 3,imdim - 4, imdim - 3, imdim - 2, imdim - 1]
         
         # filtering with ref pixels on either side of image
-        medfilterwidth = 15 # value used for JWST H2RGs. Could be modified
+        medfilterwidth = medfiltersize # value used for JWST H2RGs. Could be modified
     
         ref=np.zeros(imdim) # contains the median-filter, mean value of the vertical ref pixels
         for xpix in ref_sides:
@@ -120,7 +120,7 @@ class refpxcorr():
                 self.im[:,j*imdim//32:(j+1)*imdim//32]-=( y_bottom*bottom  + y_top*top )
     
         return(self.im)
-    def refpxcorrtop(self,oddeven=False):
+    def refpxcorrtop(self,oddeven=False,medfiltersize=15):
         # function that corrects with reference pixels on the sides of the H2RG and H4RG.
         #
         # On the periphery of the arrays, there are 4 pixels that are not light-sensitive 
@@ -153,7 +153,7 @@ class refpxcorr():
         ref_sides = [0, 1, 2, 3,imdim - 4, imdim - 3, imdim - 2, imdim - 1]
         
         # filtering with ref pixels on either side of image
-        medfilterwidth = 15 # value used for JWST H2RGs. Could be modified
+        medfilterwidth = medfiltersize # value used for JWST H2RGs. Could be modified
     
         ref=np.zeros(imdim) # contains the median-filter, mean value of the vertical ref pixels
         for xpix in ref_sides:
@@ -208,7 +208,7 @@ class refpxcorr():
 
                 self.im[:,j*imdim//32:(j+1)*imdim//32]-=( y_top*top )
         return(self.im)
-    def refpxcorrside(self,oddeven=False):
+    def refpxcorrside(self,oddeven=False,medfiltersize=15):
         # function that corrects with reference pixels on the sides of the H2RG and H4RG.
         #
         # On the periphery of the arrays, there are 4 pixels that are not light-sensitive 
@@ -241,7 +241,7 @@ class refpxcorr():
         ref_sides = [0, 1, 2, 3,imdim - 4, imdim - 3, imdim - 2, imdim - 1]
         
         # filtering with ref pixels on either side of image
-        medfilterwidth = 15 # value used for JWST H2RGs. Could be modified
+        medfilterwidth = medfiltersize # value used for JWST H2RGs. Could be modified
     
         ref=np.zeros(imdim) # contains the median-filter, mean value of the vertical ref pixels
         for xpix in ref_sides:

@@ -6,7 +6,7 @@ Created on Sun Dec 13 11:53:18 2020
 @author: espressjo
 """
 
-from numpy import shape,asarray,zeros,mean,std
+from numpy import shape,asarray,zeros,mean,std,fliplr
 from scipy.ndimage import zoom
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats as sc
@@ -55,6 +55,21 @@ class hxread(refpxcorr,stats):
         stats.__init__(self,self.im)
         refpxcorr.__init__(self,self.im)
         #implement for data
+    def unfold(self):
+        '''
+        Flip [l/r] every odd amp. This can be usefull to perform fft, 
+        or IPC analysis. fit() method should be called before this.
+
+        Returns
+        -------
+        None.
+
+        '''
+        w = int(self.x*1024/32.)
+        for i in range(32):
+            if (i+1)%2!=0:
+                amp = self.im[:,i*w:(i*w)+w]
+                self.im[:,i*w:(i*w)+w] = fliplr(amp)                
     def get_bias(self,sigma=5):
         return sc(self.im,sigma=sigma)
     def refpx(self,**kwargs):
