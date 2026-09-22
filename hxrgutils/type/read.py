@@ -15,46 +15,92 @@ from os import getcwd
 from hxrgutils.type.amp import hxrg_amp
 from hxrgutils.fits2ramp.refpixcorr import refpxcorr
 from hxrgutils.stats.stats import stats
-from numpy import ndarray,isnan,isfinite,interp
+from hxrgutils.type.header import as_header
+from numpy import isfinite,interp,arange
 
 class hxread(refpxcorr,stats):
     def __init__(self,x=4):
         self.x = x
         self.im = zeros((1024*x,1024*x),dtype=float)
-        self.H = fits.Header
-        self.shape = shape(self.im)
-        self.w = self.shape[1]
-        self.h = self.shape[0]
+        self.H = None#the H property turns this into an empty fits.Header
         self.fname = ''
         self.low_pixels = 0
         self.hi_pixels = 0
+        self._update_geometry()
+        stats.__init__(self,self.im)
+        refpxcorr.__init__(self,self.im)
+    @property
+    def H(self):
+        """
+        FITS header of the read. Always a fits.Header instance, even when the
+        read was initialized from a numpy array without a header; in that case
+        it is simply empty. Anything assigned here (None, a dict, an old-style
+        fits.Header class, ...) is coerced into a header.
+        """
+        return self._H
+    @H.setter
+    def H(self,value):
+        self._H = as_header(value)
+    @property
+    def data(self):
+        """
+        stats() and refpxcorr() operate on .data; we alias it to .im so both
+        always see the current image, even after .im has been reassigned
+        (e.g., by the in-place operators).
+        """
+        return self.im
+    @data.setter
+    def data(self,value):
+        self.im = asarray(value,dtype=float)
+    def _update_geometry(self):
+        """
+        Refresh shape,h,w and x from the image currently held in .im. Called
+        every time a new image is loaded, whatever the source.
+        """
+        self.shape = shape(self.im)
+        self.h = self.shape[0]
+        self.w = self.shape[1]
+        if self.w%1024!=0 or self.h%1024!=0:
+            print("[Warning] %dx%d is not a standard HxRG format"%(self.w,self.h))
+        self.x = int(self.w/1024)
     def __call__(self,data,header=None):
+        """
+        Load a read, either from a FITS file or from a numpy array.
+
+        Parameters
+        ----------
+        data : STR/ndarray
+            FITS file name, or a 2D array of the read.
+        header : fits.Header, optional
+            Header to attach when data is an array. Without it the read simply
+            carries an empty header.
+
+        Returns
+        -------
+        None.
+
+        """
         if isinstance(data,str):
             if '/' not in data:
                 data = join(getcwd(),data)
             hdu = fits.open(data)
-            self.im = asarray(hdu[0].data,dtype=float)
-            self.H = hdu[0].header
+            if hdu[0].data is None:
+                hdu.close()
+                raise ValueError("no data in the primary HDU of %s"%data)
+            im = asarray(hdu[0].data,dtype=float)
+            self.H = hdu[0].header if header is None else header
             self.fname = basename(data)
             hdu.close()
-            self.shape = (self.H['NAXIS1'],self.H['NAXIS2'])
-            self.w = self.shape[1]
-            self.h = self.shape[0]
-            self.x = int(self.w/1024)
         else:
-            self.im = asarray(data,dtype=float)
-            self.shape = data.shape
-            self.w = self.shape[1]
-            self.h = self.shape[0]
-            self.x = int(self.w/1024)
-            if header==None:
-                self.H = fits.Header()
-            else:
-                self.H = header
+            im = asarray(data,dtype=float)
+            self.H = header#None gives an empty header
             self.fname = "tmp.fits"
+        if im.ndim!=2:
+            raise ValueError("hxread handles a single 2D read, got a %dD array. Use make_ramp() for a cube of reads."%im.ndim)
+        self.im = im
+        self._update_geometry()
         stats.__init__(self,self.im)
         refpxcorr.__init__(self,self.im)
-        #implement for data
     def unfold(self):
         '''
         Flip [l/r] every odd amp. This can be usefull to perform fft, 
@@ -83,8 +129,6 @@ class hxread(refpxcorr,stats):
         else:
             self.refpxcorr()
             self.H.add_comment('refpixcorr performed')
-    def writeto(self,fname):
-        fits.PrimaryHDU(data=self.im,header=self.H).writeto(fname,overwrite=True)
     def ds9(self):
         fits.PrimaryHDU(data=self.im,header=self.H).writeto("/var/tmp/read.fits",overwrite=True)
         from os import popen 
@@ -93,7 +137,7 @@ class hxread(refpxcorr,stats):
         #pixel size of the binning box
         import numpy as np
         pix_bin = pixel_bin
-        nbin = (self.x*1024)//pix_bin
+        nbin = self.w//pix_bin
         percentile = 50
         im = np.copy(self.im)
         box = np.zeros([nbin,nbin])
@@ -123,6 +167,11 @@ class hxread(refpxcorr,stats):
         self.low_pixels = len(rav[rav==1])
         return self.low_pixels,self.hi_pixels
     def get_amp(self,n):
+        """
+        Return the nth amplifier (1 to 32) as a hxrg_amp instance.
+        """
+        if n<1 or n>32:
+            raise ValueError("amp. number must be between 1 and 32, got %s"%n)
         x_start = (n-1)*int(self.w/32)
         x_stop = (n)*int(self.w/32)
         return hxrg_amp(self.im[:,x_start:x_stop],namp=n)
@@ -133,7 +182,7 @@ class hxread(refpxcorr,stats):
         if isinstance(other,hxread):
             F = hxread()
             F(self.im-other.im)
-            F.H = self.H
+            F.H = self.H.copy()
             newFile = "%s-%s"%(self.fname,other.fname)
             F.fname = newFile
             F.H.add_comment(newFile)
@@ -146,7 +195,7 @@ class hxread(refpxcorr,stats):
         if isinstance(other,hxread):
             F = hxread()
             F(self.im+other.im)
-            F.H = self.H
+            F.H = self.H.copy()
             newFile = "%s+%s"%(self.fname,other.fname)
             F.fname = newFile
             F.H.add_comment(newFile)
@@ -183,7 +232,7 @@ class hxread(refpxcorr,stats):
         if isinstance(other,hxread):
             F = hxread()
             F(self.im/other.im)
-            F.H = self.H
+            F.H = self.H.copy()
             newFile = "%s/%s"%(self.fname,other.fname)
             F.fname = newFile
             F.H.add_comment(newFile)
@@ -196,7 +245,7 @@ class hxread(refpxcorr,stats):
         if isinstance(other,hxread):
             F = hxread()
             F(self.im*other.im)
-            F.H = self.H
+            F.H = self.H.copy()
             newFile = "%s*%s"%(self.fname,other.fname)
             F.fname = newFile
             F.H.add_comment(newFile)
@@ -217,6 +266,9 @@ class hxread(refpxcorr,stats):
 
         f,ax = plt.subplots(figsize=(10,5))
         x,y = self.fft(max_freq)
+        if len(x)<1:
+            print("[Warning] nothing to plot")
+            return f,ax
         ax.plot(x,y)
         xx,yy = self.get_freq()
         if 'SEQID' in self.H:
@@ -233,41 +285,81 @@ class hxread(refpxcorr,stats):
             plt.show()
         return f,ax
     def fft(self,max_freq=200):
+        '''
+        Amplitude spectrum of the read in the readout time domain. Each of the
+        32 amp. is normalized by its median and co-added (in readout order) to
+        boost the SNR of the noise pattern common to all amp.
+
+        NaN are handled as follow; a NaN pixel is simply not co-added and the
+        sample is rescaled by the number of amp. that did contribute. A sample
+        where every amp. is NaN is linearly interpolated from its finite
+        neighbours, and an amp. with no valid normalization is skipped. If
+        nothing is finite, two empty arrays are returned.
+
+        Parameters
+        ----------
+        max_freq : FLOAT, optional
+            Highest frequency returned, in Hz. The default is 200.
+
+        Returns
+        -------
+        xf : ndarray
+            Frequencies (Hz).
+        yf : ndarray
+            Amplitudes.
+
+        '''
         from scipy.fft import fft
         from numpy import linspace,abs
-        
-        t = asarray(range(int( (self.w/32)*self.w) ))*0.00001
-        y = zeros(( int( (self.w/32)*self.w )  ))
+
+        nsample = int(self.h*int(self.w/32))
+        t = arange(nsample)*0.00001
+        y = zeros(nsample)
+        nco = zeros(nsample)#number of amp. co-added on each sample
         for i in range(32):
             amp = self.get_amp(i+1)
-            amp/=amp.stats('median')
-            y+= amp.ravel()
-        
-        if any(isnan(y)):
+            norm = amp.stats('median')
+            if not isfinite(norm) or norm==0:
+                print("[Warning] amp. %d has no valid median, skipped in the fft"%(i+1))
+                continue
+            amp/=norm
+            a = amp.ravel()
+            good = isfinite(a)
+            y[good]+=a[good]
+            nco[good]+=1
+
+        good = nco>0
+        if good.sum()<2:
+            print("[Warning] no valid pixel left, no fft computed")
+            return asarray([]),asarray([])
+        #keep the amplitude scale of a full 32 amp. co-add
+        y[good]*= 32./nco[good]
+        if not good.all():
             print("\n::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
-            print(":::   [Warning] NaN detected, fix solution not yet fully tested.   :::")
+            print(":::   [Warning] NaN detected, interpolated before the fft.        :::")
             print("::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\n")
-            mask = isfinite(y)
-            y = interp(t,t[mask],y[mask])    
-            t = t[mask]
-        
+            #interpolate on the full time grid, t must keep its sampling
+            y = interp(t,t[good],y[good])
+
         tt = t[-1]-t[0]
         N = len(t)
         T = tt / N
-        
+
         yf = fft(y)
         yf = asarray(2.0/N * abs(yf[0:N//2]))
         xf = linspace(0.0, 1.0/(2.0*T), N//2)
         xf = xf[xf<=max_freq]
         yf = yf[0:len(xf)]
-        
+
         return xf[1:],yf[1:]
     def get_freq(self):
         from scipy.signal import argrelextrema
         from numpy import greater,zeros
         from astropy.stats import sigma_clipped_stats as sc
         
-        x,y = self.fft()        
+        x,y = self.fft()
+        if len(y)<3:
+            return [],[]
         mn,_,st = sc(y)
         peaks_id = argrelextrema(y,greater,order=10)
         mask1 = zeros((len(y)),dtype=bool)
@@ -281,14 +373,13 @@ class hxread(refpxcorr,stats):
         Y,X = zip(*sorted(zip(peaksY,peaksX),reverse=True))
         return X,Y
     def copy(self):
+        """
+        Deep copy of the read. The new instance shares neither its image nor
+        its header with the original.
+        """
         h = hxread()
-        h.im = self.im
-        h.H = self.H
+        h(self.im.copy(),header=self.H.copy())
         h.fname = self.fname
-        h.shape = self.shape
-        h.w = self.w
-        h.h = self.h
-        h.x = self.x
         return h
     def get_ro(self):
         st = [self.get_amp(i+1).stats('std') for i in range(32)]
@@ -311,8 +402,6 @@ class hxread(refpxcorr,stats):
             plt.show()
         return f,ax
     def __str__(self):
-        return self.H.tostring(sep='\n')
-    def __eq__(self):
         return self.H.tostring(sep='\n')
 if '__main__' in __name__:
     read1 = hxread()

@@ -6,9 +6,11 @@ Created on Mon Feb 13 16:20:47 2023
 @author: espressjo
 """
 
+import warnings
+
 import numpy as np
 
-def f_h_lines(im:np.ndarray,start=0,stop=4096):
+def f_h_lines(im:np.ndarray,start=0,stop=None):
     """
     Remove horizontal line commonly found after 1/f noise is removed due
     to capacitive coupling.
@@ -16,20 +18,26 @@ def f_h_lines(im:np.ndarray,start=0,stop=4096):
     Parameters
     ----------
     im : np.ndarray
-        HXRG ndarray.
+        HXRG ndarray, any format (H2RG, H4RG).
+    start,stop : INT, optional
+        Column range used to measure the level of each row. By default the
+        full width of the array is used.
 
     Returns
     -------
-    im : TYPE
-        DESCRIPTION.
+    im : ndarray
+        Image without its horizontal lines.
 
     """
-    if im.dtype!=np.float64:
-        im = im.astype(np.float64)
-    H = np.zeros(im.shape)
-    for i in range(im.shape[0]):
-        H[i,:] = np.nanmedian(im[i,start:stop])
-    return im-H
+    im = np.asarray(im,dtype=np.float64)
+    if stop is None:
+        stop = im.shape[1]
+    with warnings.catch_warnings():
+        #an all-NaN row simply gets no correction
+        warnings.simplefilter("ignore",category=RuntimeWarning)
+        level = np.nanmedian(im[:,start:stop],axis=1)
+    level = np.where(np.isfinite(level),level,0.0)
+    return im-level[:,None]
 def butterfly(im:np.ndarray,amps=32):
     """
     Calculate and subtract the butterfly effect we see on raw ramps.
@@ -37,7 +45,9 @@ def butterfly(im:np.ndarray,amps=32):
     Parameters
     ----------
     im : np.ndarray
-        Ramps.
+        Ramps, any format (H2RG, H4RG).
+    amps : INT, optional
+        Number of amplifiers. The default is 32.
 
     Returns
     -------
@@ -47,21 +57,27 @@ def butterfly(im:np.ndarray,amps=32):
         Calculated butterfly pattern.
 
     """
-    if im.dtype!=np.float64:
-        im = im.astype(np.float64)
+    im = np.asarray(im,dtype=np.float64)
+    if im.shape[1]%amps!=0:
+        raise ValueError("width %d is not a multiple of the %d amp."%(im.shape[1],amps))
+    w = im.shape[1]//amps#128 px on an H4RG, 64 px on an H2RG
     butterfly = np.zeros(im.shape)
     strip = [];
     for i in range(amps):
         if i%2==0:
-            strip.append(np.fliplr(im[:,i*128:(i+1)*128]))
+            strip.append(np.fliplr(im[:,i*w:(i+1)*w]))
         else:
-            strip.append(im[:,i*128:(i+1)*128])
-    _strip = np.median(strip,axis=0)
-    for i in range(32):
+            strip.append(im[:,i*w:(i+1)*w])
+    with warnings.catch_warnings():
+        #an all-NaN position across every amp. gets no correction
+        warnings.simplefilter("ignore",category=RuntimeWarning)
+        _strip = np.nanmedian(strip,axis=0)
+    _strip = np.where(np.isfinite(_strip),_strip,0.0)
+    for i in range(amps):
         if i%2==0:
-            butterfly[:,i*128:(i+1)*128] = np.fliplr(_strip)
+            butterfly[:,i*w:(i+1)*w] = np.fliplr(_strip)
         else:
-            butterfly[:,i*128:(i+1)*128] = _strip
+            butterfly[:,i*w:(i+1)*w] = _strip
     return im-butterfly,butterfly
 def preprocess(im:np.ndarray):
     """
