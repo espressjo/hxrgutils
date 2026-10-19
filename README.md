@@ -204,7 +204,29 @@ R.fit()              # you still have to call fit()
 | Non-linearity | `R.upload_nonlin('nl.fits')` or `make_ramp(nonlin=...)` | ext 0 = C3 coefficient, ext 1 = C2 coefficient (2D each); applied as `x + C3*x**3 + C2*x**2` on the bias-subtracted read |
 
 Upload them **before** streaming reads. A missing file prints a message and falls back
-to self-bias / no non-linearity correction. Shape mismatches raise `ValueError`.
+to self-bias / no non-linearity correction.
+
+#### Expected shapes
+
+Both files must match the detector format of the reads, as `(height, width)` (row-major):
+**2048 x 2048** for an H2RG, **4096 x 4096** for an H4RG.
+
+| File | HDUs | Content | Shape |
+| --- | --- | --- | --- |
+| Super-bias | primary HDU (`ext 0`) | 2D image of the bias level, in ADU | `(N, N)`, same as one read |
+| Non-linearity | `ext 0` | C3 coefficient (2D) | `(N, N)` |
+| | `ext 1` | C2 coefficient (2D) | `(N, N)`, same as `ext 0` |
+
+- The bias must be exactly 2D; a cube or 1D array raises `ValueError`.
+- Uploading the bias **before any read** also sets the ramp geometry (so `h2rg` is
+  not needed); the reads that follow must then match it.
+- If the ramp geometry is already known (a read was streamed, or a bias uploaded
+  first), a bias or NL file of a different shape raises `ValueError`.
+- If the NL file is uploaded first and the reads turn out to have a different shape,
+  the first read prints a warning and the non-linearity correction is **disabled**
+  (no error), so check the output messages.
+- A `UID` keyword in the primary header of either file is copied into the ramp header
+  (`BIASUID` / `NLUID`).
 
 ### Slope error and output layout
 
