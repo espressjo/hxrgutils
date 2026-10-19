@@ -83,7 +83,62 @@ def make_ramp(fname,errors=False,nonlin="",bias="",**kwargs):
         R.create_error(fname)
     return R
 class hxramp():
+    """
+    Up-the-ramp (slope) fit of a series of reads, or a ramp file loaded from disk.
+
+    Two ways to use it:
+
+    1. Build a ramp from reads: stream them one at a time with <<, then fit().
+
+           R = hxramp(h2rg=True, saturation=45000)
+           for read in reads:      # hxread, 2D array or file name, in time order
+               R << read
+           R.fit()                 # fills R.a (slope, ADU/s) and R.b (intercept)
+           R.writeto('ramp.fits')
+
+    2. Load an existing ramp product: R('ramp.fits'). The layout is told by
+       the number of HDUs: 4 = NIRPS (slope, intercept, n), 5 = SPIRou/SPIP
+       (slope, intercept, errslope, n). A single HDU or a 3D array is a cube
+       of reads and is streamed instead (fit() is then left to the caller).
+
+    Keyword arguments (all optional)
+    --------------------------------
+    h2rg : BOOL
+        Hint for a 2048x2048 array (else 4096x4096). The data loaded always
+        overrides it.
+    saturation : FLOAT
+        ADU above which a read is excluded, for that pixel and all later
+        reads. Default 45000.
+    norefpxcorr : BOOL
+        Skip the reference-pixel correction.
+    refpxeachread : BOOL
+        Correct each (read - bias) while streaming instead of correcting the
+        slope once in fit().
+    toponly : BOOL
+        Side + top reference pixels only (no bottom).
+    notopnobottom : BOOL
+        Side reference pixels only. toponly has priority if both are set.
+    oddeven : BOOL
+        Treat odd and even columns separately in the correction.
+
+    Main attributes
+    ---------------
+    a, b : ndarray
+        Slope (ADU/s) and intercept (ADU, bias added back).
+    n : ndarray (int16)
+        Number of non-saturated reads used per pixel.
+    errslope : ndarray
+        Formal slope error; NaN until create_error() has run (or the file
+        loaded had one).
+    H : fits.Header
+        Header, copied from the first read (empty for array input).
+    inttime : float
+        Time between reads, (w*h)*1e-5/32 s.
+    nl : BOOL
+        True once a non-linearity file has been uploaded.
+    """
     def __init__(self,**kwargs):
+        """See the class docstring for the accepted keyword arguments."""
         if 'h2rg' in kwargs and kwargs.get('h2rg'):
             self.x = 2
         else:
@@ -199,13 +254,15 @@ class hxramp():
             self<<r
     def nlcorr(self,array):
         """
-        Apply the non-lineariy correction. If no NL file
-        is provided, this function will return its inputs
+        Apply the non-linearity correction, array + C3*array**3 + C2*array**2.
+        The array should already be bias-subtracted. If no NL file was
+        uploaded, the input is returned unchanged.
 
         Parameters
         ----------
-        array : 
-            4096X4096 array.
+        array : ndarray
+            2D array with the same shape as the NL coefficients (e.g.,
+            4096x4096 for an H4RG).
 
         Returns
         -------
@@ -222,12 +279,16 @@ class hxramp():
         """
         Upload a non-linearity calibration file. The NL file
         should have 2 extension where ext=0 is the C3 coefficient
-        and ext=1 is the C2 coefficient.
+        and ext=1 is the C2 coefficient (2D images). Call it before
+        streaming reads. A missing file only prints a message (no NL
+        correction). If the ramp geometry is already known and differs from
+        the coefficients, a ValueError is raised. A "UID" keyword in the file
+        is copied to the ramp header as NLUID.
 
         Parameters
         ----------
         f : str
-            DESCRIPTION.
+            Path of the non-linearity file.
 
         Returns
         -------
@@ -248,7 +309,17 @@ class hxramp():
             print('%s not found, no nl-correction will be apply'%f)
     def upload_bias(self,fname:str):
         '''
-        Upload a super bias
+        Upload a super bias (2D FITS image in the primary HDU), used instead
+        of the default self-bias (first read). Call it before streaming
+        reads; it also fixes the ramp geometry. A missing file prints a
+        warning and self-bias is kept; a wrong shape or ndim raises
+        ValueError. A "UID" keyword in the file is copied to the header as
+        BIASUID.
+
+        Parameters
+        ----------
+        fname : str
+            Path of the bias file.
         '''
         if isfile(fname):
             bias = np.asarray(fits.getdata(fname),dtype=float)
@@ -265,8 +336,10 @@ class hxramp():
             print("[Warning] bias file not found, will perform selfbias")            
     def unfold(self):
         '''
-        Flip [l/r] every odd amp. This can be usefull to perform fft, 
-        or IPC analysis. fit() method should be called before this.
+        Put slope, intercept and n in readout-time order, in place: every
+        other amplifier ribbon (amp. 1, 3, 5, ...) is flipped left/right.
+        Useful for an fft or an IPC analysis. fit() (or loading a ramp) must
+        be done first; calling it twice restores the original orientation.
 
         Returns
         -------
@@ -351,12 +424,14 @@ class hxramp():
             self.total_integration = self.inttime*float(np.amax(self.n))
     def init_from_read(self,read):
         '''
-        Initialize a new ramp using a 1st read
+        Initialize the accumulators (sx, sx2, sy, sxy, n, a, b), all zeros, for
+        a new ramp using a 1st read to set the geometry. Called by << on the
+        first read; there is normally no need to call it yourself.
 
         Parameters
         ----------
         read : hxread
-            DESCRIPTION.
+            First read; only its shape is used.
 
         Returns
         -------
@@ -373,17 +448,22 @@ class hxramp():
         self.b = np.zeros(self.shape)#intercept
     def applyrefpxcorr(self,array):
         '''
-        Apply ref pix. correction given the options
+        Apply the reference-pixel correction selected by the ramp options:
+        toponly -> refpxcorrtop (side + top), else notopnobottom ->
+        refpxcorrside (side only), else refpxcorr (side + top + bottom);
+        oddeven is forwarded to all of them. norefpxcorr is *not* checked
+        here (fit() does that).
 
         Parameters
         ----------
-        array : TYPE
-            DESCRIPTION.
+        array : ndarray
+            2D array to correct. It is wrapped, not copied, so a float array
+            is modified in place; pass np.copy(array) to keep the original.
 
         Returns
         -------
-        TYPE
-            DESCRIPTION.
+        ndarray
+            The corrected array.
 
         '''
         from hxrgutils.fits2ramp.refpixcorr import refpxcorr as rpc
@@ -394,6 +474,7 @@ class hxramp():
         else:
             return rpc(np.asarray(array,dtype=float)).refpxcorr(oddeven=self.oddeven)
     def get_time(self):
+        """Time stamps (s) of the reads streamed so far, without the last one."""
         return self.timestamp[:-1]
     def get_coeff(self):
         '''
@@ -416,7 +497,10 @@ class hxramp():
         return a,b
     def writeto(self,fname):
         """
-        Write the fits2ramp to file.
+        Write the ramp to a FITS file (overwrites). Layout: primary header,
+        then slope, intercept, [errors,] n. The errors extension (5 HDUs,
+        SPIRou/SPIP layout) is present only if the errors were computed or
+        loaded; otherwise 4 HDUs (NIRPS layout).
 
         Parameters
         ----------
@@ -436,17 +520,25 @@ class hxramp():
         hdul.writeto(fname,overwrite=True)
     def __lshift__(self, o):  
         """
-        Calculate the fits2ramp as a streaming algorithm. The nth read is 
+        Calculate the fits2ramp as a streaming algorithm. The nth read is
         feed as a hxread to the hxramp. e.g.,
-        
+
         for read in [read1,read2,...]:
             Ramp << read
         ramp.fit()
-        
+
+        Per read: update the saturation mask and n, subtract the bias (the
+        first read unless a bias file was uploaded), apply the NL correction
+        and (if refpxeachread) the reference-pixel correction, then add to the
+        running sums sy and sxy. Reads must come in time order; read i is
+        stamped i*inttime. The header of the ramp is a copy of the first
+        read's. Streaming into a ramp loaded from a file raises RuntimeError.
+
         Parameters
         ----------
-        o : hxread
-            Ramp nth read as a hxread instance.
+        o : hxread/ndarray/str
+            Ramp nth read as a hxread instance. A 2D array or a file name is
+            wrapped into an hxread automatically.
 
         Returns
         -------
@@ -488,8 +580,14 @@ class hxramp():
         self.sxy[self.goodmask]+=(imc[self.goodmask]*self.inttime*(self.i))
     def create_error(self,fname):
         """
-        Once the fits2ramp is calculated either by calling  << operator
-        or by uploading a SPIP, SPIRou or NIRPS ramp file.
+        Compute the formal error on the slope (self.errslope) from the reads,
+        once the fits2ramp is calculated either by calling  << operator
+        or by uploading a SPIP, SPIRou or NIRPS ramp file. Each read is
+        bias-subtracted, NL-corrected and reference-pixel corrected with the
+        same options as the fit, and compared with the fitted line. Sets
+        err_calulated so writeto() then emits the 5-HDU layout. Needs at
+        least 3 reads (otherwise only a warning is printed) and reads with
+        the same shape as the ramp.
 
         Parameters
         ----------
@@ -566,12 +664,14 @@ class hxramp():
         self.errslope[valid] = np.sqrt(vary2[valid]/(self.n[valid]-2))/np.sqrt(varx2[valid])
     def create_sx(self):
         """
-        Utility function in case a ramp file is uploaded (sx not in this case)
+        Per-pixel sum of the time stamps of the n valid reads, rebuilt from n
+        (and the time stamps, generated from inttime if missing). Needed by
+        create_error() when a ramp file was loaded, since sx is not stored.
 
         Returns
         -------
-        TYPE
-            DESCRIPTION.
+        ndarray
+            sx, 0 where n == 0.
 
         """
         if len(self.timestamp)!=0:
@@ -589,6 +689,13 @@ class hxramp():
         """
         One of the main function. Once all the FITS file (hxread) are
         streamed, you can call fit to compute the slope and intercept.
+
+        Solves the linear fit from the running sums for pixels with n > 1
+        (others keep slope and intercept 0), then, unless norefpxcorr or
+        refpxeachread is set, applies the reference-pixel correction to the
+        slope (not to the intercept). The bias is added back to the
+        intercept. Prints which options were applied. Raises RuntimeError if
+        no read was streamed.
 
         Returns
         -------
@@ -651,7 +758,9 @@ class hxramp():
         plt.show()
     def preprocess(self):
         """
-        Apply a quick preprocessing to the slope.
+        Apply a quick preprocessing to the slope (horizontal-line and
+        "butterfly" pattern removal, see hxrgutils.preprocess.preprocess).
+        Replaces self.a.
 
         Returns
         -------

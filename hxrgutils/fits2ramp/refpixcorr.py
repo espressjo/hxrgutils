@@ -3,7 +3,24 @@ import scipy.ndimage.filters
 
 
 class refpxcorr():
+    """
+    Reference-pixel corrections for H2RG/H4RG images. A mixin: it works on
+    self.im, a square 2D float array (hxread and hxramp wrap their arrays in
+    it). Every correction modifies self.im IN PLACE and also returns it, so
+    pass a copy if you need the original.
+
+    Three levels, from the most to the least complete:
+
+        refpxcorr()      side + top + bottom reference pixels
+        refpxcorrtop()   side + top only
+        refpxcorrside()  side only
+
+    The methods are not NaN-safe on the side pixels (a NaN there wipes out
+    whole rows through the median filter); only the top/bottom medians
+    ignore non-finite values.
+    """
     def __init__(self,data):
+        """data : 2D array to correct (not copied); stored as self.im."""
         self.im = data
     def nanmedian(self,data):
         # this function returns the median of finite values within
@@ -22,6 +39,32 @@ class refpxcorr():
         return(np.median(data2[g]))
     
     def refpxcorr(self,oddeven=False,medfiltersize=15):
+        """
+        Full correction: side, then top and bottom reference pixels.
+
+        1. Side (columns 0-3 and N-4..N-1): each is median-filtered along the
+           column, the 8 are averaged into one value per row, and that is
+           subtracted from the whole row (removes the fast 1/f noise common
+           to all amplifiers).
+        2. Top/bottom: for each of the 32 amplifier ribbons, the median of
+           the 4 bottom and 4 top reference rows is measured; a linear
+           gradient (full bottom value at row 0, full top value at the last
+           row) is subtracted across the ribbon.
+
+        Parameters
+        ----------
+        oddeven : BOOL, optional
+            Measure and correct odd and even columns of each ribbon
+            separately (step 2). The default is False.
+        medfiltersize : INT, optional
+            Width of the running median on the side pixels (step 1). The
+            default is 15 (the JWST H2RG value).
+
+        Returns
+        -------
+        ndarray
+            self.im, corrected in place.
+        """
         # function that corrects with reference pixels on the sides of the H2RG and H4RG.
         #
         # On the periphery of the arrays, there are 4 pixels that are not light-sensitive 
@@ -121,6 +164,25 @@ class refpxcorr():
     
         return(self.im)
     def refpxcorrtop(self,oddeven=False,medfiltersize=15):
+        """
+        Side + top correction (the bottom reference rows are ignored).
+
+        Same side step as refpxcorr(); then, per amplifier ribbon, the median
+        of the 4 top reference rows is subtracted as a constant offset (no
+        gradient). Useful when the bottom reference rows are not trusted.
+
+        Parameters
+        ----------
+        oddeven : BOOL, optional
+            Odd and even columns get their own top offset. Default False.
+        medfiltersize : INT, optional
+            Width of the running median on the side pixels. Default 15.
+
+        Returns
+        -------
+        ndarray
+            self.im, corrected in place.
+        """
         # function that corrects with reference pixels on the sides of the H2RG and H4RG.
         #
         # On the periphery of the arrays, there are 4 pixels that are not light-sensitive 
@@ -209,6 +271,23 @@ class refpxcorr():
                 self.im[:,j*imdim//32:(j+1)*imdim//32]-=( y_top*top )
         return(self.im)
     def refpxcorrside(self,oddeven=False,medfiltersize=15):
+        """
+        Side-only correction: the row-wise 1/f step of refpxcorr() and
+        nothing else (no top/bottom).
+
+        Parameters
+        ----------
+        oddeven : BOOL, optional
+            Accepted for a uniform signature but unused here, since there is
+            no top/bottom step. Default False.
+        medfiltersize : INT, optional
+            Width of the running median on the side pixels. Default 15.
+
+        Returns
+        -------
+        ndarray
+            self.im, corrected in place.
+        """
         # function that corrects with reference pixels on the sides of the H2RG and H4RG.
         #
         # On the periphery of the arrays, there are 4 pixels that are not light-sensitive 

@@ -8,8 +8,8 @@ reference-pixel correction, up-the-ramp (slope) fitting and noise diagnostics.
 pip install -e .
 ```
 
-Besides `astropy` (declared in `setup.py`) the code needs `numpy`, `scipy`,
-`matplotlib`, `seaborn`, `tqdm`, `natsort` and `scanf`.
+Requires Python >= 3.10 and `numpy`, `scipy`, `astropy`, `matplotlib`, `seaborn`, `tqdm`
+and `natsort`; `pip` installs them from `setup.py`.
 
 ## Contents
 
@@ -165,8 +165,10 @@ What `fit()` produces:
 
 - `R.a`: slope in ADU/s. `R.b`: intercept (bias added back). `R.n`: number of
   non-saturated reads used per pixel.
-- Pixels with fewer than 2 valid reads keep slope 0 (NaN pixels never pass the
-  saturation mask, so they end with `n == 0` and slope 0, not NaN).
+- Pixels with fewer than 2 valid reads keep slope 0, not NaN. A NaN pixel never passes the
+  saturation mask, so it is dropped **from that read onward**: a NaN in read 3 leaves
+  `n == 2` and a slope fitted on the first two reads; only a pixel that is NaN from the
+  start ends with `n == 0`. Check `R.n` if your data contains NaNs.
 - Without a bias file, the **first read is used as the bias** (self-bias) and is
   subtracted from every read.
 
@@ -203,8 +205,11 @@ R.fit()              # you still have to call fit()
 | Super-bias | `R.upload_bias('bias.fits')` or `make_ramp(bias=...)` | 2D image, same shape as the reads |
 | Non-linearity | `R.upload_nonlin('nl.fits')` or `make_ramp(nonlin=...)` | ext 0 = C3 coefficient, ext 1 = C2 coefficient (2D each); applied as `x + C3*x**3 + C2*x**2` on the bias-subtracted read |
 
-Upload them **before** streaming reads. A missing file prints a message and falls back
-to self-bias / no non-linearity correction.
+Upload them **before** streaming reads. Called directly, `upload_bias()` /
+`upload_nonlin()` print a message for a missing file and fall back to self-bias / no
+non-linearity correction. **`make_ramp(bias=..., nonlin=...)` is silent**: a path that does
+not exist is skipped without any message, so a typo gives a self-biased, uncorrected ramp.
+Check the path, or call the `upload_*` methods yourself.
 
 #### Expected shapes
 
@@ -281,8 +286,13 @@ R = hxramp(h2rg=True, norefpxcorr=True)                # raw slope, no correctio
 ```
 
 The correction is applied through `hxramp.applyrefpxcorr(array)`, which you can also call
-yourself on any 2D array with the options currently set on the ramp. `create_error()`
-uses the same options so the error is consistent with the fit.
+yourself on any 2D array with the options currently set on the ramp.
+
+> **Known limitations.** `applyrefpxcorr()` does not look at `norefpxcorr`, and
+> `create_error()` always calls it, so with `norefpxcorr=True` the slope is uncorrected
+> but the slope error is still computed on reference-pixel-corrected reads. Also,
+> `fit()` prints "Ref. px. corrected on the slope" and "All ref. px. used" even when
+> `norefpxcorr=True`; the printed messages are not reliable in that case.
 
 ---
 

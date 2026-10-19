@@ -19,7 +19,42 @@ from hxrgutils.type.header import as_header
 from numpy import isfinite,interp,arange
 
 class hxread(refpxcorr,stats):
+    """
+    One detector read (a single 2D FITS frame) from an H2RG/H4RG.
+
+    The object is built empty and then *called* to load data:
+
+        r = hxread()
+        r('read.fits')                 # from a FITS file
+        r(array, header=some_header)   # or from a 2D array (header optional)
+
+    Inherits the reference-pixel corrections from refpxcorr (in place on .im)
+    and the sigma-clipped statistics/histogram helpers from stats.
+
+    Attributes
+    ----------
+    im : ndarray
+        The image (float). Also reachable as .data.
+    H : fits.Header
+        Header of the read. Always a real header, empty when the data came
+        from an array without a header.
+    fname : str
+        Base name of the source file ("tmp.fits" for an array).
+    shape, h, w, x : tuple/int
+        Geometry, always re-derived from the data loaded (x = 2 for an H2RG,
+        4 for an H4RG). The x argument of __init__ only sizes the empty image.
+    low_pixels, hi_pixels : int
+        Filled by get_deviant_pixels().
+    """
     def __init__(self,x=4):
+        """
+        Parameters
+        ----------
+        x : INT, optional
+            Detector size in units of 1024 pixels (2: H2RG, 4: H4RG). Only
+            used to size the empty placeholder image; loading data overrides
+            it. The default is 4.
+        """
         self.x = x
         self.im = zeros((1024*x,1024*x),dtype=float)
         self.H = None#the H property turns this into an empty fits.Header
@@ -103,8 +138,10 @@ class hxread(refpxcorr,stats):
         refpxcorr.__init__(self,self.im)
     def unfold(self):
         '''
-        Flip [l/r] every odd amp. This can be usefull to perform fft, 
-        or IPC analysis. fit() method should be called before this.
+        Put the image in readout-time order, in place. Adjacent amplifiers
+        are read in opposite directions, so every other ribbon (amp. 1, 3,
+        5, ...) is flipped left/right. Useful before an fft or an IPC
+        analysis. Calling it twice restores the original orientation.
 
         Returns
         -------
@@ -117,9 +154,44 @@ class hxread(refpxcorr,stats):
                 amp = self.im[:,i*w:(i*w)+w]
                 self.im[:,i*w:(i*w)+w] = fliplr(amp)                
     def get_bias(self,sigma=5):
+        """
+        Sigma-clipped (mean, median, std) of the whole image, e.g., to
+        characterize a bias read.
+
+        Parameters
+        ----------
+        sigma : FLOAT, optional
+            Clipping threshold. The default is 5.
+
+        Returns
+        -------
+        tuple
+            (mean, median, std) as returned by astropy's sigma_clipped_stats.
+        """
         return sc(self.im,sigma=sigma)
     def refpx(self,**kwargs):
-        
+        """
+        Reference-pixel correction of the read, in place on self.im, and a
+        comment added to the header.
+
+        Parameters
+        ----------
+        toponly : BOOL, optional
+            Side + top reference pixels (refpxcorrtop).
+        sideonly : BOOL, optional
+            Side (left/right) reference pixels only (refpxcorrside).
+            toponly has priority if both are given. With neither, the full
+            correction (side + top + bottom, refpxcorr) is applied.
+
+        NOTE
+        ----
+            oddeven and medfiltersize are not forwarded; call refpxcorr(),
+            refpxcorrtop() or refpxcorrside() directly to use them.
+
+        Returns
+        -------
+        None.
+        """
         if 'toponly' in kwargs and kwargs.get('toponly'):
             self.refpxcorrtop()
             self.H.add_comment('refpixcorr performed [top only]')
@@ -130,10 +202,32 @@ class hxread(refpxcorr,stats):
             self.refpxcorr()
             self.H.add_comment('refpixcorr performed')
     def ds9(self):
+        """Write the read to /var/tmp/read.fits and open it in ds9 (zscale). Needs ds9 on the PATH."""
         fits.PrimaryHDU(data=self.im,header=self.H).writeto("/var/tmp/read.fits",overwrite=True)
         from os import popen 
         popen("ds9 -zscale /var/tmp/read.fits").read()
     def get_deviant_pixels(self,pixel_bin=32,low_threshold=0.5,hi_threshold=1.3):
+        """
+        Count pixels far from the local level of the image. The image is
+        divided by a low-frequency map (median of each pixel_bin x pixel_bin
+        box, zoomed back to full size); pixels whose ratio is above
+        hi_threshold or below low_threshold are counted. The 4-pixel
+        reference border is ignored.
+
+        Parameters
+        ----------
+        pixel_bin : INT, optional
+            Size of the binning box in pixels. The default is 32.
+        low_threshold : FLOAT, optional
+            Ratio under which a pixel is "low". The default is 0.5.
+        hi_threshold : FLOAT, optional
+            Ratio over which a pixel is "high". The default is 1.3.
+
+        Returns
+        -------
+        low_pixels, hi_pixels : INT
+            Counts, also stored in self.low_pixels and self.hi_pixels.
+        """
         #pixel size of the binning box
         import numpy as np
         pix_bin = pixel_bin
@@ -176,9 +270,15 @@ class hxread(refpxcorr,stats):
         x_stop = (n)*int(self.w/32)
         return hxrg_amp(self.im[:,x_start:x_stop],namp=n)
     def writeto(self,fname):
-        hdul = fits.PrimaryHDU(data=self.im,header=self.H)
+        """Write the image and its header to a single-HDU FITS file (overwrites)."""
+        hdul =fits.PrimaryHDU(data=self.im,header=self.H)
         hdul.writeto(fname,overwrite=True)
+    # Arithmetic. The binary operators (+ - * / **) return a NEW hxread and
+    # leave the operands untouched; with another hxread the header is copied
+    # from the left operand and a comment names the operation. The in-place
+    # operators (+= -= *= /=) modify self.im. other is an hxread or a scalar/array.
     def __sub__(self,other):
+        """self - other (CDS when both are reads). Returns a new hxread."""
         if isinstance(other,hxread):
             F = hxread()
             F(self.im-other.im)
@@ -260,6 +360,21 @@ class hxread(refpxcorr,stats):
             temp.im = temp.im*self.im
         return temp
     def show_fft(self,show=True,max_freq=200):
+        """
+        Plot the amplitude spectrum from fft() and label (up to 8) detected
+        peaks from get_freq().
+
+        Parameters
+        ----------
+        show : BOOL, optional
+            Call plt.show(). The default is True.
+        max_freq : FLOAT, optional
+            Highest frequency plotted, in Hz. The default is 200.
+
+        Returns
+        -------
+        f, ax : matplotlib figure and axes.
+        """
         from matplotlib import pyplot as plt
         import seaborn as sns
         sns.set_theme()
@@ -353,6 +468,16 @@ class hxread(refpxcorr,stats):
 
         return xf[1:],yf[1:]
     def get_freq(self):
+        """
+        Find the noise peaks of the fft(): local maxima that stand more than
+        20 sigma (sigma-clipped) above the mean amplitude.
+
+        Returns
+        -------
+        X, Y : tuple/list
+            Frequencies (Hz) and amplitudes of the peaks, strongest first.
+            Two empty lists when there is no peak or no valid spectrum.
+        """
         from scipy.signal import argrelextrema
         from numpy import greater,zeros
         from astropy.stats import sigma_clipped_stats as sc
@@ -382,9 +507,28 @@ class hxread(refpxcorr,stats):
         h.fname = self.fname
         return h
     def get_ro(self):
+        """
+        Readout noise estimate: sigma-clipped std of each of the 32
+        amplifiers; returns (mean, std) of those 32 values, in ADU. Most
+        meaningful on a bias-like read or a CDS.
+        """
         st = [self.get_amp(i+1).stats('std') for i in range(32)]
         return mean(st),std(st)
     def show(self,show=True,**kwargs):
+        """
+        Display the read (zscale, sqrt stretch).
+
+        Parameters
+        ----------
+        show : BOOL, optional
+            Call plt.show(). The default is True.
+        title : STR, optional (kwarg)
+            Plot title; defaults to the file name.
+
+        Returns
+        -------
+        f, ax : matplotlib figure and axes.
+        """
         from matplotlib import pyplot as plt
         import seaborn as sns
         from astropy.visualization import (SqrtStretch,ImageNormalize,ZScaleInterval)
@@ -402,6 +546,7 @@ class hxread(refpxcorr,stats):
             plt.show()
         return f,ax
     def __str__(self):
+        """The header, one card per line."""
         return self.H.tostring(sep='\n')
 if '__main__' in __name__:
     read1 = hxread()
